@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::LanguageExtensions'
+Description: >
+  AWS CloudFormation template to create a Security Group allowing ingress to port 22.
+
+Parameters:
+  VpcId:
+    Description: The ID of the VPC where the security group will be created.
+    Type: AWS::EC2::VPC::Id
+
+  CidrBlocks:
+    Description: Comma-delimited list of CIDR blocks allowed to access port 22.
+    Type: CommaDelimitedList
+
+Resources:
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH access
+      VpcId: !Ref VpcId
+
+  # Create an ingress rule for each CIDR block
+  'Fn::ForEach::IngressRules':
+    - Cidr
+    - !Ref CidrBlocks
+    - 'IngressRules&{Cidr}':
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+          GroupId: !Ref MySecurityGroup
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref Cidr
+
+Outputs:
+  SecurityGroupId:
+    Description: The ID of the created security group.
+    Value: !Ref MySecurityGroup

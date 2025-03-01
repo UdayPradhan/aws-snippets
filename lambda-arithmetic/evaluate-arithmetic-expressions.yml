@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: An AWS Lambda function in Python to evaluate arithmetic operations
+
+Parameters:
+  ArithmeticExpression:
+    Description: The arithmetic expression to evaluate. Must follow Python syntax.
+    Type: String
+    Default: "2 + 3 - (4 * 3)"
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaLogAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*
+
+  EvaluateExpressionLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code: 
+        ZipFile: |
+          import ast
+          import operator
+          import cfnresponse
+
+          OPERATORS = {
+              ast.Add: operator.add,
+              ast.Sub: operator.sub,
+              ast.Mult: operator.mul,
+              ast.Div: operator.truediv,
+              ast.FloorDiv: operator.floordiv,
+              ast.Mod: operator.mod,
+              ast.Pow: operator.pow,
+              ast.USub: operator.neg,
+              ast.UAdd: operator.pos,
+          }
+
+          class Evaluator(ast.NodeVisitor):
+              def visit_BinOp(self, node):
+                  left = self.visit(node.left)
+                  right = self.visit(node.right)
+                  op_type = type(node.op)
+                  if op_type in OPERATORS:
+                      return OPERATORS[op_type](left, right)
+                  raise ValueError(f"Unsupported operation: {op_type}")
+
+              def visit_Num(self, node):
+                  return node.value
+
+              def visit_Expr(self, node):
+                  return self.visit(node.value)
+
+              def visit_UnaryOp(self, node):
+                  operand = self.visit(node.operand)
+                  op_type = type(node.op)
+                  if op_type in OPERATORS:
+                      return OPERATORS[op_type](operand)
+                  raise ValueError(f"Unsupported unary operation: {op_type}")
+
+              def visit(self, node):
+                  if isinstance(node, ast.Expression):
+                      return self.visit(node.body)
+                  return super().visit(node)
+
+              def generic_visit(self, node):
+                  raise ValueError(f"Unsupported node type: {type(node).__name__}")
+
+          def lambda_handler(event, context):
+              try:
+                  request_type = event.get('RequestType')
+                  # If the request is for deletion, just send a SUCCESS response and return
+                  if request_type == 'Delete':
+                      print("Received delete request. Sending success response.")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  expression = event['ResourceProperties'].get('ArithmeticExpression', '')
+                  print(f"The expression given is: {expression}")
+
+                  # Parse the expression into an AST
+                  node = ast.parse(expression, mode='eval')
+                  # Evaluate the AST using the Evaluator class
+                  evaluator = Evaluator()
+                  result = evaluator.visit(node)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Value': result})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Message': str(e)})
+      Runtime: python3.13
+      Timeout: 30
+
+  EvaluateCustomExpression:
+    Type: Custom::EvaluateCustomExpression
+    Properties:
+      ServiceToken: !GetAtt EvaluateExpressionLambda.Arn
+      ArithmeticExpression: !Ref ArithmeticExpression
+
+Outputs:
+  LambdaFunctionArn:
+    Description: The ARN of the Lambda function
+    Value: !GetAtt EvaluateExpressionLambda.Arn
+
+  LambdaReturnValue:
+    Description: The return value from the Lambda function
+    Value: !GetAtt EvaluateCustomExpression.Value
