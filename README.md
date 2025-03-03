@@ -4,7 +4,7 @@
 Welcome to the AWS Snippets repository! This is an open-source collection of interesting solutions to daily problems encountered while using Amazon Web Services (AWS).
 
 ## Purpose
-[!IMPORTANT]
+
 The purpose of this repository is to:
 
 1. Share practical solutions to common AWS challenges
